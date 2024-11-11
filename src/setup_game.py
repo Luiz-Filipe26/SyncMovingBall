@@ -38,6 +38,7 @@ def create_turtle(color=None):
 
     if tartaruga_cor:
         head.color(tartaruga_cor)
+        head.choosedColor = tartaruga_cor  # Armazena a cor escolhida em formato hexadecimal
 
     return head
 

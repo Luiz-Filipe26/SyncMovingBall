@@ -1,3 +1,4 @@
+import threading
 import time
 import uuid
 import setup_game
@@ -18,17 +19,17 @@ player_id = str(uuid.uuid4())
 # Flag para verificar se o jogador foi conectado
 connected = False
 
-# Configurando publisher
+# Configurando PUBLISHER
 def on_publish(client, userdata, result):
     pass
 
 
-# Configurando data_receiver
+# Configurando DATA_RECEIVER
 def on_connect(client, userdata, flags, rc):
     print("Connected with result code " + str(rc))
     client.subscribe("/data")
 
-
+# Configurando DATA_RECEIVER
 def on_message(client, userdata, msg):
     try:
         # Decodifica o payload e divide pelo delimitador ":"
@@ -72,20 +73,18 @@ def on_message(client, userdata, msg):
 
             # Atualiza a posição da turtle do jogador no dicionário
             turtle = players[received_id]
-            turtle.setx(position[0])
-            turtle.sety(position[1])
-            print(f"Jogador {received_id} movido para {position}")
+            threading.Thread(target=turtle.goto, args=(position[0], position[1])).start()
+            # print(f"Jogador {received_id} movido para {position}")
 
     except ValueError as e:
         print("Erro ao converter coordenadas para float:", e)
 
 def connect_message():
     global connected
-    if not connected:
-        color = player_turtle.color()[0]  # Acessa diretamente a cor da turtle do jogador local
-        publisher.publish("/data", f"CONNECT:{player_id}:{color}")
-        # Marca como conectado localmente para permitir o movimento
-        connected = True
+    color = player_turtle.choosedColor  # Utiliza a cor diretamente do atributo 'choosedColor'
+    publisher.publish("/data", f"CONNECT:{player_id}:{color}")
+    connected = True
+    print(f"Mensagem de conexão enviada do player {player_id} da cor {color}")
 
 def manage_direction(delta_time):
     if not connected:
@@ -180,14 +179,15 @@ def on_escape():
 
 
 if __name__ == "__main__":
-    publisher = setup_game.create_publisher(on_publish)
-    data_receiver = setup_game.create_data_receiver(on_connect, on_message)
-
     wn = create_screen()
 
     # Cria a turtle para este jogador e adiciona ao dicionário de players
     player_turtle = create_turtle()  # Ou escolha uma cor
     players[player_id] = player_turtle
+
+    # Agora que a tartaruga foi criada, podemos criar o publisher e o data_receiver
+    publisher = setup_game.create_publisher(on_publish)
+    data_receiver = setup_game.create_data_receiver(on_connect, on_message)
 
     wn.listen()
     wn.onkey(on_escape, "Escape")
