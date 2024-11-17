@@ -1,9 +1,8 @@
 import time
 import uuid
-import setup_game
 import math
 from pynput import keyboard
-from setup_game import create_screen, create_turtle
+from setup_game import create_screen, create_turtle, create_publisher, create_data_receiver, read_directions
 
 ATUALIZATIONS_PER_SECOND = 100
 DELAY = 1.0 / ATUALIZATIONS_PER_SECOND
@@ -83,6 +82,10 @@ def update_current_player_coordinate(delta_time):
     dx = dy = 0
     turtle_step = TURTLE_STEP_PER_SECOND * delta_time
 
+    # Normaliza a velocidade ao mover na diagonal
+    if dx != 0 and dy != 0:
+        turtle_step /= math.sqrt(2)
+
     if directions_pressed['up']:
         dy += turtle_step
     if directions_pressed['down']:
@@ -91,11 +94,6 @@ def update_current_player_coordinate(delta_time):
         dx -= turtle_step
     if directions_pressed['right']:
         dx += turtle_step
-
-    # Normaliza a velocidade ao mover na diagonal
-    if dx != 0 and dy != 0:
-        dx = (1 if dx > 0 else -1) * turtle_step / math.sqrt(2)
-        dy = (1 if dy > 0 else -1) * turtle_step / math.sqrt(2)
 
     # Atualiza a direção do player no dicionário turtle_by_id
     player_turtle.current_position = (player_turtle.xcor() + dx, player_turtle.ycor() + dy)
@@ -170,18 +168,17 @@ if __name__ == "__main__":
     window = create_screen()
 
     player_turtle = create_turtle()
-    player_turtle.changed_position = True
     player_turtle.current_position = player_turtle.position()  # Usar a posição inicial do jogador
     turtle_by_id[player_id] = player_turtle
     initial_info_by_id[player_id] = {'color': player_turtle.choosedColor, 'initial_pos': player_turtle.position()}
 
-    publisher = setup_game.create_publisher(on_publish)
-    data_receiver = setup_game.create_data_receiver(on_connect, on_message)
+    publisher = create_publisher(on_publish)
+    data_receiver = create_data_receiver(on_connect, on_message)
 
     window.listen()
     window.onkey(on_escape, "Escape")
 
-    mappings = setup_game.read_directions()
+    mappings = read_directions()
     print("Teclas mapeadas: ", mappings)
 
     connect_message()
