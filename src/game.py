@@ -1,99 +1,88 @@
-import threading
 import time
 import uuid
 import setup_game
 import math
 from pynput import keyboard
-from setup_game import create_screen, create_turtle  # Importando as funções
+from setup_game import create_screen, create_turtle
 
 ATUALIZATIONS_PER_SECOND = 100
 DELAY = 1.0 / ATUALIZATIONS_PER_SECOND
 TURTLE_STEP_PER_SECOND = 200
 
-# Dicionário que relaciona UUIDs com suas respectivas turtles
-players = {}
+turtle_by_id = {}  # Relaciona IDs de jogadores com as tartarugas
+initial_info_by_id = {}  # Relaciona IDs de jogadores com as informações iniciais (cor, posição inicial)
 
-# ID único para este jogador
 player_id = str(uuid.uuid4())
+player_turtle = None
+is_game_running = True
 
-# Flag para verificar se o jogador foi conectado
-connected = False
 
-# Configurando PUBLISHER
 def on_publish(client, userdata, result):
     pass
 
-
-# Configurando DATA_RECEIVER
 def on_connect(client, userdata, flags, rc):
     print("Connected with result code " + str(rc))
+    if rc == 0:
+        print("Conexão bem-sucedida!")
+    else:
+        print("Falha na conexão. Código de erro:", rc)
     client.subscribe("/data")
 
-# Configurando DATA_RECEIVER
+
 def on_message(client, userdata, msg):
-    try:
-        # Decodifica o payload e divide pelo delimitador ":"
-        data = msg.payload.decode().split(":")
+    data = msg.payload.decode().split(":")
+    # Mensagem de conexão: "CONNECT:UUID:turtleColor:x,y"
+    if data[0] == "CONNECT" and len(data) == 4:  # Registrar informações iniciais do jogador
+        received_id = data[1]
+        if received_id == player_id:
+            return
 
-        # Verifica se a mensagem é de conexão ou de movimentação
-        if data[0] == "CONNECT" and len(data) == 3:
-            # Mensagem de conexão: "CONNECT:UUID:turtleColor"
-            received_id = data[1]
-            turtle_color = data[2]
+        turtle_color = data[2]
+        initial_pos = tuple(map(float, data[3].strip("()").split(",")))
 
-            # Cria uma nova turtle para o jogador e define sua cor
-            if received_id not in players:
-                new_turtle = create_turtle(turtle_color)
-                players[received_id] = new_turtle
-                print(f"Novo jogador {received_id} conectado com cor {turtle_color}.")
+        # Criar uma nova turtle se ela ainda não existir
+        if received_id not in turtle_by_id:
+            initial_info_by_id[received_id] = {'color': turtle_color, 'initial_pos': initial_pos}
+            print(f"Novo jogador {received_id} conectado com cor {turtle_color} e posição inicial {initial_pos}.")
 
-                # Envia uma mensagem de conexão própria para o novo jogador
-                if received_id != player_id:
-                    connect_message()
-            else:
-                print(f"Jogador {received_id} já está conectado.")
+        connect_message()
 
-        elif len(data) == 2:
-            # Mensagem de movimentação: "UUID:(x,y)"
-            received_id = data[0]
+    # Mensagem de movimentação: "UUID:(x,y)"
+    elif len(data) == 2:  # Receber posição do player
+        received_id = data[0]
+        if received_id == player_id:
+            return
 
-            # Verifica se o jogador já foi registrado (recebeu mensagem de conexão)
-            if received_id not in players:
-                print(f"Jogador {received_id} não está conectado. Ignorando movimentação.")
-                return
+        if received_id not in turtle_by_id:
+            print(f"Jogador {received_id} não está conectado. Ignorando movimentação.")
+            return
 
-            # Extrai e converte as coordenadas para float
-            position_data = data[1].strip("()").split(",")
-            if len(position_data) != 2:
-                print("Erro: Coordenadas recebidas em formato inesperado:", data[1])
-                return
+        position_data = data[1].strip("()").split(",")
+        if len(position_data) != 2:
+            print("Erro: Coordenadas recebidas em formato inesperado:", data[1])
+            return
 
-            # Converte as coordenadas para float
+        try:
             position = tuple(map(float, position_data))
+            turtle = turtle_by_id[received_id]
+        except ValueError as e:
+            print("Erro ao converter coordenadas para float:", e)
+            return
 
-            # Atualiza a posição da turtle do jogador no dicionário
-            turtle = players[received_id]
-            threading.Thread(target=turtle.goto, args=(position[0], position[1])).start()
-            # print(f"Jogador {received_id} movido para {position}")
-
-    except ValueError as e:
-        print("Erro ao converter coordenadas para float:", e)
+        turtle.current_position = position
+        turtle.changed_position = True
 
 def connect_message():
-    global connected
-    color = player_turtle.choosedColor  # Utiliza a cor diretamente do atributo 'choosedColor'
-    publisher.publish("/data", f"CONNECT:{player_id}:{color}")
-    connected = True
-    print(f"Mensagem de conexão enviada do player {player_id} da cor {color}")
+    color = player_turtle.choosedColor
+    initial_pos = player_turtle.position()  # Obtém a posição inicial do jogador
+    publisher.publish("/data", f"CONNECT:{player_id}:{color}:{initial_pos}")
+    print(f"Mensagem de conexão enviada do player {player_id} da cor {color} e posição inicial {initial_pos}")
 
-def manage_direction(delta_time):
-    if not connected:
-        return
 
+def update_current_player_coordinate(delta_time):
     dx = dy = 0
-    turtle_step = TURTLE_STEP_PER_SECOND * delta_time  # Movimentação ajustada pelo deltaTime
+    turtle_step = TURTLE_STEP_PER_SECOND * delta_time
 
-    # Define o movimento com base nas direções pressionadas
     if directions_pressed['up']:
         dy += turtle_step
     if directions_pressed['down']:
@@ -103,107 +92,104 @@ def manage_direction(delta_time):
     if directions_pressed['right']:
         dx += turtle_step
 
-    # Compensa o movimento diagonal
+    # Normaliza a velocidade ao mover na diagonal
     if dx != 0 and dy != 0:
         dx = (1 if dx > 0 else -1) * turtle_step / math.sqrt(2)
         dy = (1 if dy > 0 else -1) * turtle_step / math.sqrt(2)
 
-    # Move a tartaruga deste jogador
-    players[player_id].setx(players[player_id].xcor() + dx)
-    players[player_id].sety(players[player_id].ycor() + dy)
+    # Atualiza a direção do player no dicionário turtle_by_id
+    player_turtle.current_position = (player_turtle.xcor() + dx, player_turtle.ycor() + dy)
+    player_turtle.changed_position = True
 
 
-def synchronize():
-    if not connected:
-        return
-
+def publish_move():
     is_moving = any(directions_pressed.values()) and not (
             directions_pressed.get("right") and directions_pressed.get("left") or
             directions_pressed.get("up") and directions_pressed.get("down")
     )
 
     if is_moving:
-        # Envia o UUID e a posição atual do jogador para o tópico MQTT
-        publisher.publish("/data", f"{player_id}:{players[player_id].position()}")
+        publisher.publish("/data", f"{player_id}:{player_turtle.position()}")
 
 
-def move():
-    global last_time
+def move_turtles(delta_time):
+    update_current_player_coordinate(delta_time)
+
+    # Iterar sobre tartarugas já inicializadas
+    for registered_player_id, info in initial_info_by_id.copy().items():
+        # Criar nova tartaruga caso não instanciada
+        if registered_player_id not in turtle_by_id:
+            new_turtle = create_turtle(info['color'])
+            new_turtle.changed_position = True
+            new_turtle.current_position = info['initial_pos']  # Usar a posição inicial do jogador
+            turtle_by_id[registered_player_id] = new_turtle
+
+        # Atualiza a posição da tartaruga
+        turtle = turtle_by_id[registered_player_id]
+        if turtle.changed_position:
+            turtle.goto(turtle.current_position)
+            turtle.changed_position = False
+
+    window.update()
+
+def game_loop(last_time):
+    if not is_game_running:
+        return
+
     current_time = time.time()
-    delta_time = current_time - last_time  # Calculando o deltaTime
-    last_time = current_time  # Atualiza o tempo para a próxima iteração
-    manage_direction(delta_time)
-    wn.update()
+    delta_time = current_time - last_time
+    move_turtles(delta_time)
+    publish_move()
 
+    # Reagendar o loop com o novo last_time
+    window.ontimer(lambda: game_loop(current_time), int(DELAY * 1000))
 
-def game_loop():
-    move()
-    synchronize()
-    wn.ontimer(game_loop, int(DELAY * 1000))  # Chama o game_loop novamente após o delay
-
-
-# Gerencia teclada pressionada
 def on_press(key):
-    try:
-        if key == keyboard.KeyCode.from_char(mappings['up']):
-            directions_pressed['up'] = True
-        elif key == keyboard.KeyCode.from_char(mappings['left']):
-            directions_pressed['left'] = True
-        elif key == keyboard.KeyCode.from_char(mappings['down']):
-            directions_pressed['down'] = True
-        elif key == keyboard.KeyCode.from_char(mappings['right']):
-            directions_pressed['right'] = True
-    except AttributeError:
-        pass  # Caso o evento seja uma tecla especial (como shift, ctrl)
+    set_direction_state(key, True)
 
-
-# Gerencia tecla liberada
 def on_release(key):
-    try:
-        if key == keyboard.KeyCode.from_char(mappings['up']):
-            directions_pressed['up'] = False
-        elif key == keyboard.KeyCode.from_char(mappings['left']):
-            directions_pressed['left'] = False
-        elif key == keyboard.KeyCode.from_char(mappings['down']):
-            directions_pressed['down'] = False
-        elif key == keyboard.KeyCode.from_char(mappings['right']):
-            directions_pressed['right'] = False
-    except AttributeError:
-        pass  # Caso o evento seja uma tecla especial (como shift, ctrl)
+    set_direction_state(key, False)
 
+def set_direction_state(key, state):
+    if not hasattr(key, 'char'):
+        return
+    char = key.char.lower()
+    if char not in mappings:
+        return
+    directions_pressed[mappings[char]] = state
 
 def on_escape():
-    wn.bye()
+    global is_game_running
+    is_game_running = False
+    window.bye()
     if listener:
         listener.stop()
 
 
 if __name__ == "__main__":
-    wn = create_screen()
+    window = create_screen()
 
-    # Cria a turtle para este jogador e adiciona ao dicionário de players
-    player_turtle = create_turtle()  # Ou escolha uma cor
-    players[player_id] = player_turtle
+    player_turtle = create_turtle()
+    player_turtle.changed_position = True
+    player_turtle.current_position = player_turtle.position()  # Usar a posição inicial do jogador
+    turtle_by_id[player_id] = player_turtle
+    initial_info_by_id[player_id] = {'color': player_turtle.choosedColor, 'initial_pos': player_turtle.position()}
 
-    # Agora que a tartaruga foi criada, podemos criar o publisher e o data_receiver
     publisher = setup_game.create_publisher(on_publish)
     data_receiver = setup_game.create_data_receiver(on_connect, on_message)
 
-    wn.listen()
-    wn.onkey(on_escape, "Escape")
+    window.listen()
+    window.onkey(on_escape, "Escape")
 
-    mappings = setup_game.read_directions()  # Lê os mapeamentos de teclas
+    mappings = setup_game.read_directions()
     print("Teclas mapeadas: ", mappings)
 
     connect_message()
 
     directions_pressed = {'up': False, 'down': False, 'left': False, 'right': False}
 
-    # Variável para controlar o deltaTime
-    last_time = time.time()
-
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-    listener.start()  # Inicia o listener em segundo plano
+    listener.start()
 
-    game_loop()
-    wn.mainloop()
+    game_loop(time.time())
+    window.mainloop()

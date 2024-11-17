@@ -1,9 +1,6 @@
 import turtle
-import paho.mqtt.client as mqttClient
-import paho.mqtt as mqtt
-from tkinter import Tk, Label
+import paho.mqtt.client as mqtt_client
 from tkinter.colorchooser import askcolor
-import time
 
 # Configurações MQTT
 BROKER_IP = "localhost"
@@ -15,18 +12,18 @@ def choose_color(prompt="Escolha uma cor"):
     color = askcolor(title=prompt)
     if color[1] is not None:
         return color[1]  # Retorna a cor em formato hexadecimal
-    return None
+    return ""
 
 
 # Função para criar a tela (Screen)
 def create_screen():
-    wn = turtle.Screen()
-    wn.title("Move Game by @Luiz")
-    wn.setup(width=800, height=600)
+    window = turtle.Screen()
+    window.title("Move Game by @Luiz")
+    window.setup(width=800, height=600)
     fundo_cor = choose_color("Escolha a cor de fundo")
-    if fundo_cor:
-        wn.bgcolor(fundo_cor)
-    return wn
+    if fundo_cor != "":
+        window.bgcolor(fundo_cor)
+    return window
 
 
 # Função para criar a tartaruga (Turtle) e aplicar a cor
@@ -45,10 +42,7 @@ def create_turtle(color=None):
 
 # Função para criar o publisher e conectar ao broker
 def create_publisher(on_publish=None):
-    if mqtt.__version__[0] > '1':
-        publisher = mqttClient.Client(mqttClient.CallbackAPIVersion.VERSION1, "admin")
-    else:
-        publisher = mqttClient.Client()
+    publisher = mqtt_client.Client()
 
     publisher.on_publish = on_publish
     publisher.connect(BROKER_IP, BROKER_PORT)
@@ -58,7 +52,7 @@ def create_publisher(on_publish=None):
 
 # Função para criar o data_receiver e configurar os callbacks on_connect e on_message
 def create_data_receiver(on_connect, on_message):
-    data_receiver = mqttClient.Client()
+    data_receiver = mqtt_client.Client()
     data_receiver.on_connect = on_connect
     data_receiver.on_message = on_message
     data_receiver.connect(BROKER_IP, BROKER_PORT, KEEPALIVE)
@@ -67,63 +61,42 @@ def create_data_receiver(on_connect, on_message):
     return data_receiver
 
 
-def read_directions():
-    # Dicionário para armazenar o mapeamento das teclas
-    directions_map = {'up': None, 'down': None, 'left': None, 'right': None}
+from tkinter import Tk, Label
 
-    # Cria a tela Tkinter para mostrar o status da configuração
+def read_directions():
+    directions_sequence = ['up', 'down', 'left', 'right']
+    directions_map = {}  # Chave: tecla, valor: direção
+
     root = Tk()
     root.title("Mapeamento de Teclas")
     root.geometry("400x300")
 
-    # Label que será atualizado com o mapeamento das teclas
-    label = Label(root, text="Pressione as teclas para mapear as direções.\nPressione qualquer tecla para começar", font=("Arial", 12))
+    label_text = "Pressione as teclas para mapear as direções.\nPressione qualquer tecla para começar"
+    label = Label(root, text=label_text, font=("Arial", 12))
     label.pack(pady=20)
 
+    current_direction_index = 0
     waiting_start = True
 
     def on_key_press(event):
-        nonlocal waiting_start
+        nonlocal waiting_start, current_direction_index
         if waiting_start:
             waiting_start = False
-            update_next_direction()
-        elif event.char and event.char not in directions_map.values():
-            if directions_map['up'] is None:
-                directions_map['up'] = event.char
-                label.config(text=f"Up: {event.char}")
-                root.after(500, update_next_direction)  # Aguarda 0.5s para passar para o próximo
-            elif directions_map['down'] is None:
-                directions_map['down'] = event.char
-                label.config(text=f"Down: {event.char}")
-                root.after(500, update_next_direction)
-            elif directions_map['left'] is None:
-                directions_map['left'] = event.char
-                label.config(text=f"Left: {event.char}")
-                root.after(500, update_next_direction)
-            elif directions_map['right'] is None:
-                directions_map['right'] = event.char
-                label.config(text=f"Right: {event.char}")
-                root.quit()  # Finaliza após o último mapeamento
+            update_label()
+        elif event.char and event.char.lower() not in directions_map.keys():
+            directions_map[event.char.lower()] = directions_sequence[current_direction_index]
+            label.config(text=f"{directions_sequence[current_direction_index].capitalize()}: {event.char}")
 
-    # Função que avança para a próxima direção
-    def update_next_direction():
-        # Atualiza o texto do Label para o próximo mapeamento
-        if directions_map['up'] is None:
-            label.config(text="Up: ___")
-        if directions_map['up'] is not None and directions_map['down'] is None:
-            label.config(text="Down: ___")
-        elif directions_map['down'] is not None and directions_map['left'] is None:
-            label.config(text="Left: ___")
-        elif directions_map['left'] is not None and directions_map['right'] is None:
-            label.config(text="Right: ___")
+            current_direction_index += 1
+            if current_direction_index < len(directions_sequence):
+                root.after(500, update_label)  # Avança para a próxima direção após 0.5s
+            else:
+                root.quit()  # Encerra após o último mapeamento
 
-    # Vincula a captura de teclas à função de mapeamento
+    update_label = lambda: label.config(text=f"{directions_sequence[current_direction_index].capitalize()}: ___")
+
     root.bind("<KeyPress>", on_key_press)
-
-    # Inicia o loop principal do tkinter para escutar os eventos de teclado
-    root.mainloop()  # O loop mantém a janela ativa até o mapeamento ser completado
-
-    root.quit()  # Garante que o tkinter termine adequadamente
-    root.destroy()  # Encerra o tkinter
+    root.mainloop()
+    root.destroy()
 
     return directions_map
